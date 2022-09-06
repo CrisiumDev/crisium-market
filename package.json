@@ -1,0 +1,19 @@
+{
+  "name": "crisium-market",
+  "version": "1.0.0",
+  "description": "Market contracts for Crisium NFT resale",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CrisiumDev/crisium-market.git"
+  },
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/CrisiumDev/crisium-market/issues"
+  },
+  "homepage": "https://github.com/CrisiumDev/crisium-market#readme"
+}
