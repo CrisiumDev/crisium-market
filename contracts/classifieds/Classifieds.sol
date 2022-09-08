@@ -28,8 +28,8 @@ contract Classifieds {
         uint256 price
     );
 
-    IERC20 currencyToken;
-    IERC721 itemToken;
+    IERC20 public currencyToken;
+    IERC721 public itemToken;
 
     struct Trade {
         address poster;
