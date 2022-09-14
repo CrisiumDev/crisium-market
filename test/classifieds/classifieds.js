@@ -14,6 +14,7 @@ const MockERC20 = artifacts.require('MockERC20');
 contract('Classifieds', (accounts) => {
     let snapshot;
 
+    const owner = accounts[0];
     const poster = accounts[1];
     const filler = accounts[2];
     const royaltyReceiver = accounts[3];
@@ -28,14 +29,7 @@ contract('Classifieds', (accounts) => {
     const PRICE = 2;
     const STATUS = 3;
 
-    context('w/o royalties', () => {
-        beforeEach(async () => {
-            snapshot = await time.latest();
-            erc20token = await MockERC20.new('Name', 'Symbol', '0');
-            erc721token = await MockERC721.new('Name', 'Symbol');
-            classifieds = await Classifieds.new(erc721token.address, erc20token.address);
-        });
-
+    function testClassifieds(testExecution = true) {
         /**
          * @test {Classifieds#openTrade}
          */
@@ -82,41 +76,43 @@ contract('Classifieds', (accounts) => {
                 ).logs[0].args.ad;
             });
 
-            /**
-             * @test {Classifieds#executeTrade}
-             */
-            it('trades can be executed', async () => {
-                await erc20token.mint(filler, ether('1'));
-                await erc20token.approve(classifieds.address, ether('1'), { from: filler });
-                await classifieds.executeTrade(tradeId, { from: filler });
-                const trade = await classifieds.getTrade(tradeId);
-                assert.equal(trade[POSTER], poster);
-                assert.equal(trade[STATUS], stringToBytes32('Executed'));
-                assert.equal(trade[ITEM], `${ERC721id}`);
-                assert.equal(trade[PRICE], `${ether('1')}`);
+            if (testExecution) {
+                /**
+                 * @test {Classifieds#executeTrade}
+                 */
+                it('trades can be executed', async () => {
+                    await erc20token.mint(filler, ether('1'));
+                    await erc20token.approve(classifieds.address, ether('1'), { from: filler });
+                    await classifieds.executeTrade(tradeId, { from: filler });
+                    const trade = await classifieds.getTrade(tradeId);
+                    assert.equal(trade[POSTER], poster);
+                    assert.equal(trade[STATUS], stringToBytes32('Executed'));
+                    assert.equal(trade[ITEM], `${ERC721id}`);
+                    assert.equal(trade[PRICE], `${ether('1')}`);
 
-                assert.equal(await erc721token.ownerOf(ERC721id), filler);
-                assert.equal(await erc20token.balanceOf(poster), `${ether('1')}`);
-            });
+                    assert.equal(await erc721token.ownerOf(ERC721id), filler);
+                    assert.equal(await erc20token.balanceOf(poster), `${ether('1')}`);
+                });
 
-            /**
-             * @test {Classifieds#executeTrade}
-             */
-            it('emits an event when executing trades', async () => {
-                await erc20token.mint(filler, ether('1'));
-                await erc20token.approve(classifieds.address, ether('1'), { from: filler });
-                expectEvent(
-                    await classifieds.executeTrade(tradeId, { from: filler }),
-                    'TradeStatusChange',
-                    {
-                        ad: `0`,
-                        status: stringToBytes32('Executed'),
-                        poster,
-                        item: `${ERC721id}`,
-                        price: ether('1').toString()
-                    },
-                );
-            });
+                /**
+                 * @test {Classifieds#executeTrade}
+                 */
+                it('emits an event when executing trades', async () => {
+                    await erc20token.mint(filler, ether('1'));
+                    await erc20token.approve(classifieds.address, ether('1'), { from: filler });
+                    expectEvent(
+                        await classifieds.executeTrade(tradeId, { from: filler }),
+                        'TradeStatusChange',
+                        {
+                            ad: `0`,
+                            status: stringToBytes32('Executed'),
+                            poster,
+                            item: `${ERC721id}`,
+                            price: ether('1').toString()
+                        },
+                    );
+                });
+            }
 
             /**
              * @test {Classifieds#cancelTrade}
@@ -186,6 +182,17 @@ contract('Classifieds', (accounts) => {
                 });
             });
         });
+    }
+
+    context('w/o royalties', () => {
+        beforeEach(async () => {
+            snapshot = await time.latest();
+            erc20token = await MockERC20.new('Name', 'Symbol', '0');
+            erc721token = await MockERC721.new('Name', 'Symbol');
+            classifieds = await Classifieds.new(erc721token.address, erc20token.address);
+        });
+
+        testClassifieds();
     });
 
     context('with royalty support', () => {
@@ -196,156 +203,7 @@ contract('Classifieds', (accounts) => {
             classifieds = await Classifieds.new(erc721token.address, erc20token.address);
         });
 
-        /**
-         * @test {Classifieds#openTrade}
-         */
-        it('emits an event when opening trades', async () => {
-            await erc721token.mint(poster, [ERC721id]);
-            await erc721token.approve(classifieds.address, ERC721id, { from: poster });
-            expectEvent(
-                await classifieds.openTrade(ERC721id, ether('1'), { from: poster }),
-                'TradeStatusChange',
-                {
-                    ad: `0`,
-                    status: stringToBytes32('Open'),
-                    poster,
-                    item: `${ERC721id}`,
-                    price: ether('1').toString()
-                },
-            );
-        });
-
-        /**
-         * @test {Classifieds#openTrade} and {Classifieds#getTrade}
-         */
-        it('opens a trade', async () => {
-            await erc721token.mint(poster, [ERC721id]);
-            await erc721token.approve(classifieds.address, ERC721id, { from: poster });
-            const tradeId = (
-                await classifieds.openTrade(ERC721id, ether('1'), { from: poster })
-            ).logs[0].args.ad;
-            const trade = await classifieds.getTrade(tradeId);
-            assert.equal(trade[POSTER], poster);
-            assert.equal(trade[STATUS], stringToBytes32('Open'));
-            assert.equal(trade[ITEM], `${ERC721id}`);
-            assert.equal(trade[PRICE], `${ether('1')}`);
-        });
-
-        describe('after opening a trade', () => {
-            let tradeId;
-
-            beforeEach(async () => {
-                await erc721token.mint(poster, [ERC721id]);
-                await erc721token.approve(classifieds.address, ERC721id, { from: poster });
-                tradeId = (
-                    await classifieds.openTrade(ERC721id, ether('1'), { from: poster })
-                ).logs[0].args.ad;
-            });
-
-            /**
-             * @test {Classifieds#executeTrade}
-             */
-            it('trades can be executed', async () => {
-                await erc20token.mint(filler, ether('1'));
-                await erc20token.approve(classifieds.address, ether('1'), { from: filler });
-                await classifieds.executeTrade(tradeId, { from: filler });
-                const trade = await classifieds.getTrade(tradeId);
-                assert.equal(trade[POSTER], poster);
-                assert.equal(trade[STATUS], stringToBytes32('Executed'));
-                assert.equal(trade[ITEM], `${ERC721id}`);
-                assert.equal(trade[PRICE], `${ether('1')}`);
-
-                assert.equal(await erc721token.ownerOf(ERC721id), filler);
-                assert.equal(await erc20token.balanceOf(poster), `${ether('1')}`);
-            });
-
-            /**
-             * @test {Classifieds#executeTrade}
-             */
-            it('emits an event when executing trades', async () => {
-                await erc20token.mint(filler, ether('1'));
-                await erc20token.approve(classifieds.address, ether('1'), { from: filler });
-                expectEvent(
-                    await classifieds.executeTrade(tradeId, { from: filler }),
-                    'TradeStatusChange',
-                    {
-                        ad: `0`,
-                        status: stringToBytes32('Executed'),
-                        poster,
-                        item: `${ERC721id}`,
-                        price: ether('1').toString()
-                    },
-                );
-            });
-
-            /**
-             * @test {Classifieds#cancelTrade}
-             */
-            it('trades can be cancelled', async () => {
-                await classifieds.cancelTrade(tradeId, { from: poster });
-                const trade = await classifieds.getTrade(tradeId);
-                assert.equal(trade[POSTER], poster);
-                assert.equal(trade[STATUS], stringToBytes32('Cancelled'));
-                assert.equal(trade[ITEM], `${ERC721id}`);
-                assert.equal(trade[PRICE], `${ether('1')}`);
-                assert.equal(await erc721token.ownerOf(ERC721id), poster);
-            });
-
-            /**
-             * @test {Classifieds#cancelTrade}
-             */
-            it('trades can only be cancelled by their posters', async () => {
-                await erc20token.mint(filler, ether('1'));
-                await erc20token.approve(classifieds.address, ether('1'), { from: filler });
-                await expectRevert(
-                    classifieds.cancelTrade(tradeId, { from: filler }),
-                    'Trade can be cancelled only by poster.',
-                );
-            });
-
-            /**
-             * @test {Classifieds#cancelTrade}
-             */
-            it('emits an event when canceling trades', async () => {
-                expectEvent(
-                    await classifieds.cancelTrade(tradeId, { from: poster }),
-                    'TradeStatusChange',
-                    {
-                        ad: `0`,
-                        status: stringToBytes32('Cancelled'),
-                        poster,
-                        item: `${ERC721id}`,
-                        price: ether('1').toString()
-                    },
-                );
-            });
-
-            describe('after closing a trade', () => {
-                beforeEach(async () => {
-                    await classifieds.cancelTrade(tradeId, { from: poster });
-                });
-
-                /**
-                 * @test {Classifieds#executeTrade}
-                 */
-                it('closed trades cannot be executed', async () => {
-                    await expectRevert(
-                        classifieds.executeTrade(tradeId, { from: poster }),
-                        'Trade is not Open.',
-                    );
-                });
-
-                /**
-                 * @test {Classifieds#cancelTrade}
-                 */
-                it('closed trades cannot be cancelled', async () => {
-                    await expectRevert(
-                        classifieds.cancelTrade(tradeId, { from: poster }),
-                        'Trade is not Open.',
-                    );
-                });
-            });
-        });
+        testClassifieds();
     });
 
     context('with royalty set', () => {
@@ -397,153 +255,180 @@ contract('Classifieds', (accounts) => {
             assert.equal(res.amountToSeller, '876600000');
         });
 
-        /**
-         * @test {Classifieds#openTrade}
-         */
-        it('emits an event when opening trades', async () => {
+        testClassifieds(false);
+
+        it('trades can be executed', async () => {
             await erc721token.mint(poster, [ERC721id]);
             await erc721token.approve(classifieds.address, ERC721id, { from: poster });
+            let tradeId = (
+                await classifieds.openTrade(ERC721id, ether('1'), { from: poster })
+            ).logs[0].args.ad;
+
+            await erc20token.mint(filler, ether('1'));
+            await erc20token.approve(classifieds.address, ether('1'), { from: filler });
+            await classifieds.executeTrade(tradeId, { from: filler });
+            const trade = await classifieds.getTrade(tradeId);
+            assert.equal(trade[POSTER], poster);
+            assert.equal(trade[STATUS], stringToBytes32('Executed'));
+            assert.equal(trade[ITEM], `${ERC721id}`);
+            assert.equal(trade[PRICE], `${ether('1')}`);
+
+            assert.equal(await erc721token.ownerOf(ERC721id), filler);
+            assert.equal(await erc20token.balanceOf(royaltyReceiver), `${ether('0.07')}`);
+            assert.equal(await erc20token.balanceOf(poster), `${ether('0.93')}`);
+        });
+
+        it('emits and event when executing trades', async () => {
+            await erc721token.mint(poster, [ERC721id]);
+            await erc721token.approve(classifieds.address, ERC721id, { from: poster });
+            let tradeId = (
+                await classifieds.openTrade(ERC721id, ether('1'), { from: poster })
+            ).logs[0].args.ad;
+
+            await erc20token.mint(filler, ether('1'));
+            await erc20token.approve(classifieds.address, ether('1'), { from: filler });
             expectEvent(
-                await classifieds.openTrade(ERC721id, ether('1'), { from: poster }),
+                await classifieds.executeTrade(tradeId, { from: filler }),
                 'TradeStatusChange',
                 {
                     ad: `0`,
-                    status: stringToBytes32('Open'),
+                    status: stringToBytes32('Executed'),
                     poster,
                     item: `${ERC721id}`,
                     price: ether('1').toString()
                 },
             );
         });
+    });
 
-        /**
-         * @test {Classifieds#openTrade} and {Classifieds#getTrade}
-         */
-        it('opens a trade', async () => {
-            await erc721token.mint(poster, [ERC721id]);
-            await erc721token.approve(classifieds.address, ERC721id, { from: poster });
-            const tradeId = (
-                await classifieds.openTrade(ERC721id, ether('1'), { from: poster })
-            ).logs[0].args.ad;
-            const trade = await classifieds.getTrade(tradeId);
-            assert.equal(trade[POSTER], poster);
-            assert.equal(trade[STATUS], stringToBytes32('Open'));
-            assert.equal(trade[ITEM], `${ERC721id}`);
-            assert.equal(trade[PRICE], `${ether('1')}`);
+    context('testing pausable', () => {
+        beforeEach(async () => {
+            snapshot = await time.latest();
+            erc20token = await MockERC20.new('Name', 'Symbol', '0');
+            erc721token = await MockERC721.new('Name', 'Symbol');
+            classifieds = await Classifieds.new(erc721token.address, erc20token.address, { from:owner });
         });
 
-        describe('after opening a trade', () => {
-            let tradeId;
+        it('reverts for non-owner attempt to pause', async () => {
+            await expectRevert(
+              classifieds.pause({ from:poster }),
+              "Ownable: caller is not the owner"
+            );
 
+            await expectRevert(
+              classifieds.pause({ from:filler }),
+              "Ownable: caller is not the owner"
+            );
+        });
+
+        it('reverts for non-owner attempt to unpause', async () => {
+            await classifieds.pause({ from:owner });
+
+            await expectRevert(
+              classifieds.unpause({ from:poster }),
+              "Ownable: caller is not the owner"
+            );
+
+            await expectRevert(
+              classifieds.unpause({ from:filler }),
+              "Ownable: caller is not the owner"
+            );
+        });
+
+        it('pausing/unpausing updates "paused()"', async () => {
+            assert.equal(await classifieds.paused(), false);
+            await classifieds.pause({ from:owner });
+            assert.equal(await classifieds.paused(), true);
+            await classifieds.unpause({ from:owner });
+            assert.equal(await classifieds.paused(), false);
+        });
+
+        describe('after unpausing', () => {
             beforeEach(async () => {
+                await classifieds.pause({ from:owner });
+                await classifieds.unpause({ from:owner });
+            });
+
+            testClassifieds();
+        });
+
+        describe('while paused', () => {
+            it('cannot open trade', async () => {
                 await erc721token.mint(poster, [ERC721id]);
                 await erc721token.approve(classifieds.address, ERC721id, { from: poster });
-                tradeId = (
-                    await classifieds.openTrade(ERC721id, ether('1'), { from: poster })
-                ).logs[0].args.ad;
-            });
 
-            /**
-             * @test {Classifieds#executeTrade}
-             */
-            it('trades can be executed', async () => {
-                await erc20token.mint(filler, ether('1'));
-                await erc20token.approve(classifieds.address, ether('1'), { from: filler });
-                await classifieds.executeTrade(tradeId, { from: filler });
-                const trade = await classifieds.getTrade(tradeId);
-                assert.equal(trade[POSTER], poster);
-                assert.equal(trade[STATUS], stringToBytes32('Executed'));
-                assert.equal(trade[ITEM], `${ERC721id}`);
-                assert.equal(trade[PRICE], `${ether('1')}`);
-
-                assert.equal(await erc721token.ownerOf(ERC721id), filler);
-                assert.equal(await erc20token.balanceOf(royaltyReceiver), `${ether('0.07')}`);
-                assert.equal(await erc20token.balanceOf(poster), `${ether('0.93')}`);
-            });
-
-            /**
-             * @test {Classifieds#executeTrade}
-             */
-            it('emits an event when executing trades', async () => {
-                await erc20token.mint(filler, ether('1'));
-                await erc20token.approve(classifieds.address, ether('1'), { from: filler });
-                expectEvent(
-                    await classifieds.executeTrade(tradeId, { from: filler }),
-                    'TradeStatusChange',
-                    {
-                        ad: `0`,
-                        status: stringToBytes32('Executed'),
-                        poster,
-                        item: `${ERC721id}`,
-                        price: ether('1').toString()
-                    },
-                );
-            });
-
-            /**
-             * @test {Classifieds#cancelTrade}
-             */
-            it('trades can be cancelled', async () => {
-                await classifieds.cancelTrade(tradeId, { from: poster });
-                const trade = await classifieds.getTrade(tradeId);
-                assert.equal(trade[POSTER], poster);
-                assert.equal(trade[STATUS], stringToBytes32('Cancelled'));
-                assert.equal(trade[ITEM], `${ERC721id}`);
-                assert.equal(trade[PRICE], `${ether('1')}`);
-                assert.equal(await erc721token.ownerOf(ERC721id), poster);
-            });
-
-            /**
-             * @test {Classifieds#cancelTrade}
-             */
-            it('trades can only be cancelled by their posters', async () => {
-                await erc20token.mint(filler, ether('1'));
-                await erc20token.approve(classifieds.address, ether('1'), { from: filler });
+                await classifieds.pause({ from:owner });
                 await expectRevert(
-                    classifieds.cancelTrade(tradeId, { from: filler }),
-                    'Trade can be cancelled only by poster.',
+                    classifieds.openTrade(ERC721id, ether('1'), { from: poster }),
+                    "Pausable: paused"
                 );
             });
 
-            /**
-             * @test {Classifieds#cancelTrade}
-             */
-            it('emits an event when canceling trades', async () => {
-                expectEvent(
-                    await classifieds.cancelTrade(tradeId, { from: poster }),
-                    'TradeStatusChange',
-                    {
-                        ad: `0`,
-                        status: stringToBytes32('Cancelled'),
-                        poster,
-                        item: `${ERC721id}`,
-                        price: ether('1').toString()
-                    },
-                );
-            });
+            describe('after opening a trade', () => {
+                let tradeId;
 
-            describe('after closing a trade', () => {
                 beforeEach(async () => {
-                    await classifieds.cancelTrade(tradeId, { from: poster });
+                    await erc721token.mint(poster, [ERC721id]);
+                    await erc721token.approve(classifieds.address, ERC721id, { from: poster });
+                    tradeId = (
+                        await classifieds.openTrade(ERC721id, ether('1'), { from: poster })
+                    ).logs[0].args.ad;
+
+                    await classifieds.pause({ from:owner });
                 });
 
                 /**
                  * @test {Classifieds#executeTrade}
                  */
-                it('closed trades cannot be executed', async () => {
+                it('trades cannot be executed', async () => {
+                    await erc20token.mint(filler, ether('1'));
+                    await erc20token.approve(classifieds.address, ether('1'), { from: filler });
+
                     await expectRevert(
-                        classifieds.executeTrade(tradeId, { from: poster }),
-                        'Trade is not Open.',
+                        classifieds.executeTrade(tradeId, { from: filler }),
+                        "Pausable: paused"
                     );
                 });
 
                 /**
                  * @test {Classifieds#cancelTrade}
                  */
-                it('closed trades cannot be cancelled', async () => {
+                it('trades can be cancelled', async () => {
+                    await classifieds.cancelTrade(tradeId, { from: poster });
+                    const trade = await classifieds.getTrade(tradeId);
+                    assert.equal(trade[POSTER], poster);
+                    assert.equal(trade[STATUS], stringToBytes32('Cancelled'));
+                    assert.equal(trade[ITEM], `${ERC721id}`);
+                    assert.equal(trade[PRICE], `${ether('1')}`);
+                    assert.equal(await erc721token.ownerOf(ERC721id), poster);
+                });
+
+                /**
+                 * @test {Classifieds#cancelTrade}
+                 */
+                it('trades can only be cancelled by their posters', async () => {
+                    await erc20token.mint(filler, ether('1'));
+                    await erc20token.approve(classifieds.address, ether('1'), { from: filler });
                     await expectRevert(
-                        classifieds.cancelTrade(tradeId, { from: poster }),
-                        'Trade is not Open.',
+                        classifieds.cancelTrade(tradeId, { from: filler }),
+                        'Trade can be cancelled only by poster.',
+                    );
+                });
+
+                /**
+                 * @test {Classifieds#cancelTrade}
+                 */
+                it('emits an event when canceling trades', async () => {
+                    expectEvent(
+                        await classifieds.cancelTrade(tradeId, { from: poster }),
+                        'TradeStatusChange',
+                        {
+                            ad: `0`,
+                            status: stringToBytes32('Cancelled'),
+                            poster,
+                            item: `${ERC721id}`,
+                            price: ether('1').toString()
+                        },
                     );
                 });
             });

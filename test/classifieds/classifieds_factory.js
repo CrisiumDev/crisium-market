@@ -1,4 +1,4 @@
-// tessting the Classifieds contract.
+// testing the Classifieds contract.
 // Modified from a test suite licensed under Apache 2.0 to account for different
 // project dependencies and to test new behavior.
 //
@@ -10,6 +10,7 @@ const Classifieds = artifacts.require('Classifieds');
 const ClassifiedsFactory = artifacts.require('ClassifiedsFactory');
 const MockERC721 = artifacts.require('MockERC721');
 const MockERC721Resale = artifacts.require('MockERC721Resale');
+const MockERC721NoMetadata = artifacts.require('MockERC721NoMetadata');
 const MockERC20 = artifacts.require('MockERC20');
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -21,7 +22,7 @@ contract('ClassifiedsFactory', (accounts) => {
 
     const poster = accounts[1];
     const filler = accounts[2];
-    const royaltyReceiver = accounts[3];
+    const royaltyReceiver = accounts[3] ;
     const deployer = accounts[4];
     const manager = accounts[5];
 
@@ -38,7 +39,7 @@ contract('ClassifiedsFactory', (accounts) => {
     beforeEach(async () => {
       snapshot = await time.latest();
       erc20token = await MockERC20.new('Name', 'Symbol', '0');
-      erc721token = await MockERC721.new('Name', 'Symbol');
+      erc721token = await MockERC721.new('ItemName 1', 'ItemSymbol 1');
       factory = await ClassifiedsFactory.new(erc20token.address, { from:deployer });
       await factory.grantRole(MANAGER_ROLE, manager, { from:deployer });
     });
@@ -82,37 +83,54 @@ contract('ClassifiedsFactory', (accounts) => {
         );
       });
 
+      it('createClassifieds behaves as expected', async () => {
+        let res = await factory.createClassifieds(erc721token.address, { from:deployer });
+
+        let classifiedsAddress = await factory.classifieds(erc721token.address);
+
+        await expectEvent.inTransaction(res.tx, factory, "ClassifiedCreated", {
+          itemName: 'ItemName 1',
+          itemSymbol: 'ItemSymbol 1',
+          itemToken: erc721token.address,
+          currencyToken:  erc20token.address,
+          classifieds: classifiedsAddress
+        });
+      });
+
+      it('createClassifieds creates a contract with expected internal state', async () => {
+        await factory.createClassifieds(erc721token.address, { from:deployer });
+
+        let classifiedsAddress = await factory.classifieds(erc721token.address);
+
+        const classifieds = await Classifieds.at(classifiedsAddress);
+        assert.equal(await classifieds.currencyToken(), erc20token.address);
+        assert.equal(await classifieds.itemToken(), erc721token.address);
+      });
+
+      it('createClassifieds behaves as expected for tokens without metadata', async () => {
+        let erc721token_noMD = await MockERC721NoMetadata.new();
+        let res = await factory.createClassifieds(erc721token_noMD.address, { from:deployer });
+
+        let classifiedsAddress = await factory.classifieds(erc721token_noMD.address);
+
+        await expectEvent.inTransaction(res.tx, factory, "ClassifiedCreated", {
+          itemName: 'Unknown Name',
+          itemSymbol: 'Unknown Symbol',
+          itemToken: erc721token_noMD.address,
+          currencyToken:  erc20token.address,
+          classifieds: classifiedsAddress
+        });
+      });
+
       context('multiple tokens', () => {
         let erc721token_2;
         let erc721token_3;
         let erc721token_4;
 
         beforeEach(async () => {
-          erc721token_2 = await MockERC721.new('Token 2', 'T2');
-          erc721token_3 = await MockERC721.new('Token 3', 'T3');
-          erc721token_4 = await MockERC721.new('Token 4', 'T4');
-        });
-
-        it('createClassifieds behaves as expected', async () => {
-          let res = await factory.createClassifieds(erc721token.address, { from:deployer });
-
-          let classifiedsAddress = await factory.classifieds(erc721token.address);
-
-          await expectEvent.inTransaction(res.tx, factory, "ClassifiedCreated", {
-            itemToken: erc721token.address,
-            currencyToken:  erc20token.address,
-            classifieds: classifiedsAddress
-          });
-        });
-
-        it('createClassifieds creates a contract with expected internal state', async () => {
-          await factory.createClassifieds(erc721token.address, { from:deployer });
-
-          let classifiedsAddress = await factory.classifieds(erc721token.address);
-
-          const classifieds = await Classifieds.at(classifiedsAddress);
-          assert.equal(await classifieds.currencyToken(), erc20token.address);
-          assert.equal(await classifieds.itemToken(), erc721token.address);
+          erc721token_2 = await MockERC721.new('ItemName 2', 'ItemSymbol 2');
+          erc721token_3 = await MockERC721.new('ItemName 3', 'ItemSymbol 3');
+          erc721token_4 = await MockERC721.new('ItemName 4', 'ItemSymbol 4');
         });
 
         it('createClassifieds can create multiple contracts', async () => {
@@ -145,6 +163,8 @@ contract('ClassifiedsFactory', (accounts) => {
           // events match
           for (let i = 0; i < 4; i++) {
             await expectEvent.inTransaction(res[i].tx, factory, "ClassifiedCreated", {
+              itemName: `ItemName ${i + 1}`,
+              itemSymbol: `ItemSymbol ${i + 1}`,
               itemToken: itemToken[i].address,
               currencyToken:  erc20token.address,
               classifieds: address[i]
@@ -339,6 +359,71 @@ contract('ClassifiedsFactory', (accounts) => {
                 });
             });
         });
+      });
+    });
+
+    describe('pausing classifieds', async () => {
+      let erc721token_2;
+      let classifieds;
+      let classifieds_2;
+
+      beforeEach(async () => {
+          erc721token_2 = await MockERC721.new('Token 2', 'T2');
+
+          await factory.createClassifieds(erc721token.address, { from:deployer });
+          await factory.createClassifieds(erc721token_2.address, { from:manager });
+
+
+          classifieds = await Classifieds.at(await factory.classifieds(erc721token.address));
+          classifieds_2 = await Classifieds.at(await factory.classifieds(erc721token_2.address));
+      });
+
+      it('only manager may pause / unpause', async () => {
+        await expectRevert(
+          factory.pause(erc721token.address, { from:poster }),
+          "ClassifiedsFactory: not authorized"
+        );
+
+        await expectRevert(
+          factory.unpause(classifieds.address, { from:filler }),
+          "ClassifiedsFactory: not authorized"
+        );
+      });
+
+      it('may pause and unpause classifieds by item token address', async () => {
+        await factory.pause(erc721token.address, { from:deployer });
+        assert.equal(await classifieds.paused(), true);
+        assert.equal(await classifieds_2.paused(), false);
+
+        await factory.pause(erc721token_2.address, { from:manager });
+        assert.equal(await classifieds.paused(), true);
+        assert.equal(await classifieds_2.paused(), true);
+
+        await factory.unpause(erc721token.address, { from:manager });
+        assert.equal(await classifieds.paused(), false);
+        assert.equal(await classifieds_2.paused(), true);
+
+        await factory.unpause(erc721token_2.address, { from:deployer });
+        assert.equal(await classifieds.paused(), false);
+        assert.equal(await classifieds_2.paused(), false);
+      });
+
+      it('may pause and unpause classifieds by classifieds address', async () => {
+        await factory.pause(classifieds.address, { from:deployer });
+        assert.equal(await classifieds.paused(), true);
+        assert.equal(await classifieds_2.paused(), false);
+
+        await factory.pause(classifieds_2.address, { from:manager });
+        assert.equal(await classifieds.paused(), true);
+        assert.equal(await classifieds_2.paused(), true);
+
+        await factory.unpause(classifieds.address, { from:manager });
+        assert.equal(await classifieds.paused(), false);
+        assert.equal(await classifieds_2.paused(), true);
+
+        await factory.unpause(classifieds_2.address, { from:deployer });
+        assert.equal(await classifieds.paused(), false);
+        assert.equal(await classifieds_2.paused(), false);
       });
     });
 });

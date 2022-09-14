@@ -4,7 +4,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/interfaces/IERC2981.sol";
 import "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
-
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 
 /**
  * @title Classifieds
@@ -19,7 +20,7 @@ import "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
  * Modified under the Apache 2.0 license to add more expressive events and support
  * for sale royalties through IERC2981.
  */
-contract Classifieds {
+contract Classifieds is Ownable, Pausable {
     event TradeStatusChange(
         uint256 indexed ad,
         bytes32 status,
@@ -98,6 +99,7 @@ contract Classifieds {
     function openTrade(uint256 _item, uint256 _price)
         public
         virtual
+        whenNotPaused
     {
         itemToken.transferFrom(msg.sender, address(this), _item);
         trades[tradeCounter] = Trade({
@@ -126,6 +128,7 @@ contract Classifieds {
     function executeTrade(uint256 _trade)
         public
         virtual
+        whenNotPaused
     {
         Trade memory trade = trades[_trade];
         require(trade.status == "Open", "Trade is not Open.");
@@ -179,5 +182,13 @@ contract Classifieds {
             _trade.item,
             _trade.price
         );
+    }
+
+    function pause() public virtual onlyOwner {
+        _pause();
+    }
+
+    function unpause() public virtual onlyOwner {
+        _unpause();
     }
 }
